@@ -40,6 +40,7 @@ from utils.utils import StoreDict
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default="CartPole-v1", help='environment ID')
+    parser.add_argument('--max-episode-steps', help='Overwrite number of maximum steps per episode.', default=-1, type=int)
     parser.add_argument('-tb', '--tensorboard-log', help='Tensorboard log dir', default='', type=str)
     parser.add_argument('-i', '--trained-agent', help='Path to a pretrained agent to continue training',
                         default='', type=str)
@@ -77,6 +78,7 @@ if __name__ == '__main__':
                         help='Optional keyword argument to pass to the env constructor')
     args = parser.parse_args()
 
+    max_episode_steps = args.max_episode_steps if args.max_episode_steps != -1 else None
     # Going through custom gym packages to let them register in the global registory
     for env_module in args.gym_packages:
         importlib.import_module(env_module)
@@ -248,6 +250,8 @@ if __name__ == '__main__':
                 print("WARNING: normalization not supported yet for DDPG/DQN")
             env = gym.make(env_id, **env_kwargs)
             env.seed(args.seed)
+            env._max_episode_steps = max_episode_steps
+            print(f"THe env has {env._max_episode_steps} env._max_episode_steps.")
             if env_wrapper is not None:
                 env = env_wrapper(env)
         else:

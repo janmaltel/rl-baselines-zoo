@@ -42,6 +42,9 @@ def main():
                         help='Do not render the environment (useful for tests)')
     parser.add_argument('--deterministic', action='store_true', default=False,
                         help='Use deterministic actions')
+    parser.add_argument('--satisficing', action='store_true', default=False,
+                        help='Use satisficing action selection')
+    parser.add_argument('--startxi', help='Random generator seed', type=float, default=0)
     parser.add_argument('--stochastic', action='store_true', default=False,
                         help='Use stochastic actions (for DDPG/DQN/SAC)')
     parser.add_argument('--load-best', action='store_true', default=False,
@@ -96,26 +99,43 @@ def main():
                           should_render=not args.no_render,
                           hyperparams=hyperparams, env_kwargs=env_kwargs)
 
+    print("THIS IS THE ENV")
+    print(env)
     # ACER raises errors because the environment passed must have
     # the same number of environments as the model was trained on.
     load_env = None if algo == 'acer' else env
     model = ALGOS[algo].load(model_path, env=load_env)
 
-    obs = env.reset()
+
 
     # Force deterministic for DQN, DDPG, SAC and HER (that is a wrapper around)
     deterministic = args.deterministic or algo in ['dqn', 'ddpg', 'sac', 'her', 'td3'] and not args.stochastic
+    satisficing = args.satisficing
+    start_xi = args.startxi
+    xi = start_xi
+
+    obs = env.reset()
+    initial_q_values = model.get_q_values(obs)
+    print("initial q values")
+    print(initial_q_values)
+    xi = np.max(model.get_q_values(obs))
+    gamma = hyperparams.get("gamma", 0.99)
+    # print(f"initial xi {xi}")
 
     episode_reward = 0.0
-    episode_rewards, episode_lengths = [], []
+    episode_rewards, episode_lengths, episode_used_actions = [], [], []
     ep_len = 0
     # For HER, monitor success rate
     successes = []
     state = None
+
+    episode = 0
+    episode_action_count = 0
+
     for _ in range(args.n_timesteps):
-        # action, state = model.predict(obs, state=state, deterministic=deterministic)
-        # action, state = model.sat_predict(obs, state=state, deterministic=deterministic)
-        action, state = model.random_predict(obs, state=state, deterministic=deterministic)
+        action, state, q_values, used_actions = model.sat_predict(obs, state=state, deterministic=deterministic, satisficing=satisficing, xi=xi)
+        episode_action_count += used_actions
+        # print(f"xi {xi}; chosen q_value {q_values[action]};  max q value {np.max(q_values)}")
 
         # Random Agent
         # action = [env.action_space.sample()]
@@ -123,6 +143,11 @@ def main():
         if isinstance(env.action_space, gym.spaces.Box):
             action = np.clip(action, env.action_space.low, env.action_space.high)
         obs, reward, done, infos = env.step(action)
+        # print(f"reward {reward}; done = {done}")
+        # xi = (xi / (gamma ** ep_len) - (gamma ** ep_len) * reward) * gamma ** (ep_len + 1)
+        xi = q_values[action] - np.minimum(reward, 0)
+        # print(f"new xi {xi}")
+
         if not args.no_render:
             env.render('human')
 
@@ -143,11 +168,14 @@ def main():
                 # is a normalized reward when `--norm_reward` flag is passed
                 print("Episode Reward: {:.2f}".format(episode_reward))
                 print("Episode Length", ep_len)
+                print(f"Episode Considered Actions {episode_action_count}")
                 state = None
                 episode_rewards.append(episode_reward)
                 episode_lengths.append(ep_len)
+                episode_used_actions.append(episode_action_count)
                 episode_reward = 0.0
                 ep_len = 0
+                episode_action_count = 0
 
             # Reset also when the goal is achieved when using HER
             if done or infos[0].get('is_success', False):
@@ -155,7 +183,12 @@ def main():
                     print("Success?", infos[0].get('is_success', False))
                 # Alternatively, you can add a check to wait for the end of the episode
                 # if done:
+                print("-------------------------------------------------------------------------------")
+                episode += 1
+                print(f"Episode {episode}")
                 obs = env.reset()
+                xi = np.max(model.get_q_values(obs))
+
                 if args.algo == 'her':
                     successes.append(infos[0].get('is_success', False))
                     episode_reward, ep_len = 0.0, 0
@@ -168,6 +201,9 @@ def main():
 
     if args.verbose > 0 and len(episode_lengths) > 0:
         print("Mean episode length: {:.2f} +/- {:.2f}".format(np.mean(episode_lengths), np.std(episode_lengths)))
+
+    if args.verbose > 0 and len(episode_used_actions) > 0:
+        print("Mean episode used actions: {:.2f} +/- {:.2f}".format(np.mean(episode_used_actions), np.std(episode_used_actions)))
 
     # Workaround for https://github.com/openai/gym/issues/893
     if not args.no_render:

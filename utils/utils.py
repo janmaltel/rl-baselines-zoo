@@ -56,6 +56,13 @@ class CustomDQNPolicy(FeedForwardPolicy):
                                               layer_norm=True,
                                               feature_extraction="mlp")
 
+class TwoLayerCustomDQNPolicy(FeedForwardPolicy):
+    def __init__(self, *args, **kwargs):
+        super(CustomDQNPolicy, self).__init__(*args, **kwargs,
+                                              layers=[32, 32],
+                                              layer_norm=True,
+                                              feature_extraction="mlp")
+
 
 class CustomMlpPolicy(BasePolicy):
     def __init__(self, *args, **kwargs):
@@ -73,6 +80,7 @@ class CustomSACPolicy(SACPolicy):
 
 register_policy('CustomSACPolicy', CustomSACPolicy)
 register_policy('CustomDQNPolicy', CustomDQNPolicy)
+register_policy('TwoLayerCustomDQNPolicy', TwoLayerCustomDQNPolicy)
 register_policy('CustomMlpPolicy', CustomMlpPolicy)
 
 
